@@ -61,7 +61,7 @@ export class CharacterSprites {
 
   defineSprites() {
     this.spriteSheets.antifarea = {
-      imagePath: 'terrain-grid/assets/sprites/antifarea_chars_2hqx.png',
+      imagePath: './assets/sprites/antifarea_chars_2hqx.png',
       maxSprites: 50000,
       dynamic: true,
       actionSequences: {
@@ -87,7 +87,7 @@ export class CharacterSprites {
     }
 
     this.spriteSheets.forest = {
-      imagePath: 'terrain-grid/assets/sprites/miniforest_2hqx.png',
+      imagePath: './assets/sprites/miniforest_2hqx.png',
       maxSprites: 500000,
       dynamic: false,
       tiles: [],

@@ -88,7 +88,7 @@ async function startApp() {
   };
 
   // Spawn actors — safe to call directly since we awaited characters.ready
-  for (let i = 0; i < 50000; i++) {
+  for (let i = 0; i < 5000; i++) {
     const x = (actorRng() - 0.5) * 200;
     const z = (actorRng() - 0.5) * 200;
     const y = terrain.getHeightAt(x, z);

@@ -12,29 +12,29 @@ export class TerrainShader {
       return tex;
     };
 
-    const blendMap = load('terrain-grid/assets/terrain/blendmap3.jpg');
+    const blendMap = load('./assets/terrain/blendmap3.jpg');
     const layers = {
       base: {
-        albedo: load('terrain-grid/assets/terrain/t2/desert_sand_dunes_100.png'),
-        normal: load('terrain-grid/assets/terrain/t2/desert_sand_dunes_100_norm.png'),
+        albedo: load('./assets/terrain/t2/desert_sand_dunes_100.jpg'),
+        normal: load('./assets/terrain/t2/desert_sand_dunes_100_norm.jpg'),
         repeat: 3,
         name: 'Base'
       },
       grass: {
-        albedo: load('terrain-grid/assets/terrain/t2/alpine_grass_rocky.png'),
-        normal: load('terrain-grid/assets/terrain/t2/alpine_cliff_a_norm.png'),
+        albedo: load('./assets/terrain/t2/alpine_grass_rocky.jpg'),
+        normal: load('./assets/terrain/t2/alpine_cliff_a_norm.jpg'),
         repeat: 2,
         name: 'Tile1'
       },
       rocky: {
-        albedo: load('terrain-grid/assets/terrain/t2/alpine_grass.png'),
-        normal: load('terrain-grid/assets/terrain/t2/desert_plants_b_norm.png'),
+        albedo: load('./assets/terrain/t2/alpine_grass.jpg'),
+        normal: load('./assets/terrain/t2/desert_plants_b_norm.jpg'),
         repeat: 2,
         name: 'Tile2'
       },
       snowy: {
-        albedo: load('terrain-grid/assets/terrain/t2/alpine_cliff_snow.png'),
-        normal: load('terrain-grid/assets/terrain/t2/alpine_cliff_a_norm.png'),
+        albedo: load('./assets/terrain/t2/alpine_cliff_snow.jpg'),
+        normal: load('./assets/terrain/t2/alpine_cliff_a_norm.jpg'),
         repeat: 2,
         name: 'Tile3'
       }
