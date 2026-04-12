@@ -58,7 +58,7 @@ export class Actor {
 
     if (distSq > 1) {
       const invDist = 1.0 / Math.sqrt(distSq);
-      const step = 10 * delta;
+      const step = 5 * delta;
       state.target.x = this.position.x + dx * invDist * step;
       state.target.z = this.position.z + dz * invDist * step;
     } else {

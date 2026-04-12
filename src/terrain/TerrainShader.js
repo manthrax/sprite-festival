@@ -16,7 +16,7 @@ export class TerrainShader {
     const sRGB = THREE.SRGBColorSpace;
     const Linear = THREE.NoColorSpace;
 
-    const layers = {
+    this.layers = {
       base: {
         albedo: load('./assets/terrain/tex_moonforrest_soil.jpg', sRGB),
         normal: load('./assets/terrain/tex_moonforrest_soil_n.jpg', Linear),
@@ -52,14 +52,20 @@ export class TerrainShader {
     this.material = new THREE.MeshPhongMaterial({
       shininess: 0.1,
       vertexColors: false,
-      map: layers.base.albedo,
-      normalMap: layers.base.normal, // Force normal-map pipeline assembly
+      map: this.layers.base.albedo,
+      normalMap: this.layers.base.normal, // Force normal-map pipeline assembly
       normalScale: new THREE.Vector2(1, 1)
     });
 
+    this.material.layers = this.layers;
+
+    this.material.extensions = {
+      drawBuffers: true
+    };
+
     this.material.onBeforeCompile = (shader) => {
-      for (const key in layers) {
-        const l = layers[key];
+      for (const key in this.layers) {
+        const l = this.layers[key];
         shader.uniforms[`tex${l.name}Color`] = { value: l.albedo };
         shader.uniforms[`tex${l.name}Bump`] = { value: l.normal };
         shader.uniforms[`repeat${l.name}`] = { value: l.repeat };
@@ -87,7 +93,7 @@ export class TerrainShader {
       shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', this.getFragmentShader());
       shader.fragmentShader = shader.fragmentShader.replace('#include <normalmap_pars_fragment>',
         '#include <normalmap_pars_fragment>\n' + this.getNormalMapPars());
-      
+
       shader.uniforms.uCameraPos = { value: new THREE.Vector3() };
       shader.uniforms.uWorldRadius = { value: 2000.0 };
       this.material.userData.shader = shader;

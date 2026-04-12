@@ -50,6 +50,7 @@ export class CharacterSprites {
           maxSprites: sheet.maxSprites || 100000,
           dynamic: sheet.dynamic !== false
         });
+        this.spriteBuffers[name].object.layers.set(1);
         this.scene.add(this.spriteBuffers[name].object);
 
         if (--pending === 0 && onReady) onReady();

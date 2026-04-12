@@ -74,7 +74,7 @@ export class Terrain {
 
     // 2. Sand (Shoreline)
     // Centered at 15.0. Fades in/out around that point.
-    if (fy > 11.0 && fy < 17.5) {
+    if (fy > -100 && fy < 17.5) {
       // Triangle weighting for the beach belt
       sand = 1.0 - Math.abs(fy - 15.0) / 2.5;
       sand = Math.max(0, sand);
@@ -85,14 +85,14 @@ export class Terrain {
       grass = blend(fy, 16.0, 18.0);
 
       // Thin the grass out at high altitudes for alpine rock/snow
-      if (fy > 70.0) {
-        grass *= (1.0 - blend(fy, 70.0, 85.0));
+      if (fy > 35.0) {
+        grass *= (1.0 - blend(fy, 35.0, 45.0));
       }
     }
 
     // 4. Snow (High caps)
-    if (fy > 70.0) {
-      snow = blend(fy, 70.0, 85.0);
+    if (fy > 45.0) {
+      snow = blend(fy, 45.0, 55.0);
     }
 
     // target stores (rock, grass, snow, sand) mapped to (x, y, z, w)
@@ -189,6 +189,7 @@ export class Terrain {
     const mesh = new THREE.Mesh(geom, this.terrainShader);
     mesh.receiveShadow = true;
     mesh.castShadow = true;
+    mesh.layers.set(10); // Isolated Layer for G-Buffer pass
 
     this.scene.add(mesh);
 
