@@ -32,14 +32,19 @@ export class Engine {
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
-      logarithmicDepthBuffer: true
+      logarithmicDepthBuffer: false
     });
     // this.renderer.setClearColor(0x87CEEB); // Sky blue
     new GradientSky(this.scene);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer. shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.container.appendChild(this.renderer.domElement);
+
+    // Advanced: Depth capture for water/FX
+    this.depthTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight);
+    this.depthTarget.depthTexture = new THREE.DepthTexture();
+    this.depthTarget.depthTexture.type = THREE.UnsignedIntType;
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -62,7 +67,15 @@ export class Engine {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.depthTarget.setSize(window.innerWidth, window.innerHeight);
     });
+
+    window.addEventListener('keydown', (e) => this.emit('keydown', e));
+    window.addEventListener('keyup', (e) => this.emit('keyup', e));
+  }
+
+  setRenderCallback(cb) {
+    this.renderCallback = cb;
   }
 
   on(event, callback) {
@@ -86,6 +99,11 @@ export class Engine {
 
     this.emit('update', delta, time);
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+
+    if (this.renderCallback) {
+      this.renderCallback(delta, time);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 }

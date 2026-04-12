@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import { Engine } from './Engine.js';
 import { Terrain } from './terrain/Terrain.js';
 import { CharacterSprites } from './sprites/CharacterSprites.js';
+import { Water } from './terrain/Water.js';
+import { WorldSim } from './world/WorldSim.js';
+import { PropLibrary } from './world/PropLibrary.js';
 
 /**
  * Seeded LCG random number generator — deterministic, reproducible layout.
- * Same seed = same forest/actor placement every reload.
  */
 function makeRng(seed = 0xdeadbeef) {
   let s = seed >>> 0;
@@ -17,8 +19,6 @@ function makeRng(seed = 0xdeadbeef) {
 
 /**
  * Main application entry point.
- * async so we can await characters.ready before starting the engine,
- * guaranteeing sprite buffers exist on the first terrain chunk callback.
  */
 async function startApp() {
   const engine = new Engine();
@@ -36,27 +36,51 @@ async function startApp() {
   sun.shadow.camera.right = sun.shadow.camera.top = 1000;
   scene.add(sun);
 
-  // Terrain
+  // Components
   const terrain = new Terrain(scene, { ntiles: 6 });
-
-  // Wait for all sprite textures to finish loading before proceeding.
-  // This guarantees spriteBuffers are fully initialised when the first
-  // terrain chunk arrives, so no retry logic is needed in populateChunk.
   const characters = new CharacterSprites(scene);
-  await characters.ready;
+  const propLib = new PropLibrary();
+  propLib.scene = scene; // Hook to main scene
+  
+  await Promise.all([characters.ready, propLib.load()]);
 
-  const actors = [];
+  const SEA_LEVEL = 15;
 
-  // Seeded RNGs — separate seeds so tree/actor layouts are independent
-  const treeRng = makeRng(0xc0ffee);
-  const actorRng = makeRng(0xdeadbeef);
+  // World Simulation
+  const worldSim = new WorldSim(terrain, characters, propLib);
+  worldSim.seaLevel = SEA_LEVEL;
 
-  // Track tree sprites per chunk key so they can be freed on eviction
-  const chunkSprites = new Map();
+  const water = new Water(scene, { level: SEA_LEVEL });
+
+  // Global RNG for non-deterministic bits (like destination picking)
+  const aiRng = makeRng(Date.now());
+
+  // Track tree sprites per chunk key (still handled locally for simplicity)
+  const chunkTrees = new Map();
+
+  let lastUiUpdate = 0;
+
+  // Input & Camera Physics
+  const keys = { w: false, a: false, s: false, d: false, q: false, e: false };
+  const camVel = new THREE.Vector3();
+  const camForward = new THREE.Vector3();
+  const camRight = new THREE.Vector3();
+  const UP = new THREE.Vector3(0, 1, 0);
+
+  engine.on('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    if (k in keys) keys[k] = true;
+  });
+  engine.on('keyup', (e) => {
+    const k = e.key.toLowerCase();
+    if (k in keys) keys[k] = false;
+  });
 
   const populateChunk = (chunk) => {
-    const sprites = [];
-    chunkSprites.set(chunk.key, sprites);
+    // 1. Populate Trees (Deterministic)
+    const treeRng = makeRng(Terrain.chunkKey(chunk.x, chunk.y) + 1);
+    const trees = [];
+    chunkTrees.set(chunk.key, trees);
 
     const worldX = chunk.x * terrain.chunkScale;
     const worldZ = chunk.y * terrain.chunkScale;
@@ -66,82 +90,142 @@ async function startApp() {
       const x = worldX + treeRng() * span;
       const z = worldZ + treeRng() * span;
       const y = terrain.getHeightAt(x, z);
+      
+      // Natural distribution: densest between 25 and 45 (treeline)
+      let density = 0;
+      if (y > SEA_LEVEL) {
+        if (y < 25) density = (y - SEA_LEVEL) / 10;
+        else if (y < 45) density = 1.0;
+        else if (y < 60) density = 1.0 - (y - 45) / 15;
+        else density = 0.05;
+      }
+
+      if (treeRng() > density) continue;
 
       const tree = characters.addSprite('forest', new THREE.Vector3(x, y - 0.5, z), (treeRng() * 16) | 0);
-      // Random scale: 0.5–2.5x, with rare 3× big trees
       const s = treeRng() < 0.001 ? 3 : (treeRng() * 2) + 0.5;
       tree.scale.set(s, s, s);
       tree.write();
-      sprites.push(tree);
+      trees.push(tree);
     }
+
+    // 2. Populate/Awaken Actors (Deterministic spawn / Progressive sim)
+    const actorRng = makeRng(Terrain.chunkKey(chunk.x, chunk.y) + 2);
+    worldSim.spawnForChunk(chunk, actorRng);
   };
 
   const evictChunk = (chunk) => {
-    const sprites = chunkSprites.get(chunk.key);
-    if (sprites) {
+    // 1. Evict Trees
+    const trees = chunkTrees.get(chunk.key);
+    if (trees) {
       const buf = characters.spriteBuffers.forest;
-      if (buf) {
-        for (const spr of sprites) buf.free(spr);
-      }
-      chunkSprites.delete(chunk.key);
+      if (buf) for (const t of trees) buf.free(t);
+      chunkTrees.delete(chunk.key);
     }
+
+    // 2. Hibernate Actors
+    worldSim.evictChunk(chunk);
   };
 
-  // Spawn actors — safe to call directly since we awaited characters.ready
-  for (let i = 0; i < 5000; i++) {
-    const x = (actorRng() - 0.5) * 200;
-    const z = (actorRng() - 0.5) * 200;
-    const y = terrain.getHeightAt(x, z);
-    const actor = characters.addSprite('antifarea', new THREE.Vector3(x, y, z), (actorRng() * 100) | 0);
-    actor.userData.nextActionTime = 0;
-    actor.userData.destination = new THREE.Vector3(x, 0, z);
-    actors.push(actor);
-  }
-
   engine.on('update', (delta, time) => {
-    const camPos = engine.camera.position;
+    const { camera, controls } = engine;
+    const camPos = camera.position;
+
+    // 1. Camera Movement (WASDQE)
+    const accel = 1500 * delta;
+    const friction = 0.92;
+
+    camera.getWorldDirection(camForward);
+    camForward.y = 0;
+    camForward.normalize();
+    camRight.crossVectors(camForward, UP).normalize();
+
+    if (keys.w) camVel.addScaledVector(camForward, accel);
+    if (keys.s) camVel.addScaledVector(camForward, -accel);
+    if (keys.a) camVel.addScaledVector(camRight, -accel);
+    if (keys.d) camVel.addScaledVector(camRight, accel);
+    if (keys.q) camVel.addScaledVector(UP, accel);
+    if (keys.e) camVel.addScaledVector(UP, -accel);
+
+    camVel.multiplyScalar(friction);
+
+    // Apply velocity to both camera and orbit target to maintain relative orientation
+    const moveStep = camVel.clone().multiplyScalar(delta);
+    camera.position.add(moveStep);
+    controls.target.add(moveStep);
+
+    // 2. Terrain & Chunk Lifecycle
     terrain.update(camPos, populateChunk, evictChunk);
 
-    // Update actors
-    characters.beginUpdate(engine.camera);
+    // 3. Simulation & Sprite Updates
+    characters.beginUpdate(camera);
+    worldSim.update(delta, time, camera, aiRng);
 
-    for (const actor of actors) {
-      const state = actor.userData;
-
-      // Basic AI: pick a new wander destination periodically
-      if (time > state.nextActionTime) {
-        state.destination.set(
-          actor.position.x + (actorRng() - 0.5) * 100,
-          0,
-          actor.position.z + (actorRng() - 0.5) * 100
-        );
-        state.nextActionTime = time + 2 + actorRng() * 3;
-      }
-
-      // Move towards destination — use distSq to avoid sqrt when not needed
-      const dx = state.destination.x - actor.position.x;
-      const dz = state.destination.z - actor.position.z;
-      const distSq = dx * dx + dz * dz;
-      if (distSq > 1) {
-        const invDist = 1.0 / Math.sqrt(distSq);
-        const step = 10 * delta;
-        state.target.x = actor.position.x + dx * invDist * step;
-        state.target.z = actor.position.z + dz * invDist * step;
-      } else {
-        state.target.x = actor.position.x;
-        state.target.z = actor.position.z;
-      }
-      state.target.y = terrain.getHeightAt(state.target.x, state.target.z);
-
-      if (actor.update) actor.update(engine.camera);
-    }
-
-    // Clamp camera above terrain surface
+    // 4. Clamp camera above terrain
     const floorH = terrain.getHeightAt(camPos.x, camPos.z) + 2;
     if (camPos.y < floorH) {
       const dy = floorH - camPos.y;
       camPos.y = floorH;
-      engine.controls.target.y += dy;
+      controls.target.y += dy;
+    }
+    // Prevent camera from getting too close to target to avoid jitter
+    if (controls.target.distanceTo(camera.position) < 5)
+      controls.target.sub(camera.position).setLength(5).add(camera.position);
+  });
+
+  // 5. Custom Advanced Rendering Pipeline
+  engine.setRenderCallback((delta, time) => {
+    const { renderer, scene, camera, depthTarget } = engine;
+
+    // A. Sync Water & Terrain Uniforms
+    water.update(camera, time, depthTarget.depthTexture);
+    
+    if (terrain.terrainShader.userData.shader) {
+      const tu = terrain.terrainShader.userData.shader.uniforms;
+      tu.uCameraPos.value.copy(camera.position);
+    }
+
+    // B. Depth Pre-pass (Terrain only)
+    water.mesh.visible = false;
+    renderer.setRenderTarget(depthTarget);
+    renderer.render(scene, camera);
+
+    // C. Final Pass (Full scene with water effects)
+    water.mesh.visible = true;
+    renderer.setRenderTarget(null);
+    renderer.render(scene, camera);
+
+    // D. Throttled UI Updates
+    if (time - lastUiUpdate > 0.25) {
+      lastUiUpdate = time;
+      const statsEl = document.getElementById('stats');
+      if (statsEl) {
+        const camPos = camera.position;
+        statsEl.innerHTML = `
+          <div class="stat-row">
+            <span class="stat-label">Camera Pos</span>
+            <span class="stat-value">
+              ${camPos.x.toFixed(1)}, ${camPos.y.toFixed(1)}, ${camPos.z.toFixed(1)}
+            </span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Active Tiles</span>
+            <span class="stat-value">${terrain.activeChunks.size}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Active NPCs</span>
+            <span class="stat-value">${worldSim.activeActorCount.toLocaleString()}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Total Population</span>
+            <span class="stat-value">${worldSim.populationSize.toLocaleString()}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Hero Units</span>
+            <span class="stat-value">${worldSim.criticalActors.size.toLocaleString()}</span>
+          </div>
+        `;
+      }
     }
   });
 

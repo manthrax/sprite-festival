@@ -42,16 +42,61 @@ export class Terrain {
   }
 
   getNoiseColor(x, z, target) {
-    target.set(0, 0, 0);
-    const p = this.colorParams;
-    for (let i = 0; i < p.length; i += 2) {
-      target.x += (Noise.simplex2(x * p[i], z * p[i]) + 1) * p[i + 1];
-      target.y += (Noise.simplex2(z * p[i], -x * p[i]) + 1) * p[i + 1];
-      target.z += (Noise.simplex2(-x * p[i], -z * p[i]) + 1) * p[i + 1];
+    const y = this.getNoiseY(x, z);
+
+    // Simple slope calculation by sampling neighbors
+    const eps = 0.1;
+    const yNR = this.getNoiseY(x + eps, z);
+    const yNF = this.getNoiseY(x, z + eps);
+    const slope = Math.sqrt(Math.pow(yNR - y, 2) + Math.pow(yNF - y, 2)) / eps;
+
+    /** Helper for smooth transitions: returns 0-1 range */
+    const blend = (val, start, end) => {
+      if (val < start) return 0;
+      if (val > end) return 1;
+      return (val - start) / (end - start);
+    };
+
+    // Correct for world-space scaling
+    const worldY = y * this.chunkScale;
+
+    // Add noise-based fuzzing to the height boundaries (±2.0 units)
+    const fuzz = (Noise.simplex2(x * 0.1, z * 0.1) * 2.0);
+    const fy = worldY + fuzz;
+
+    let rock = 0, grass = 0, snow = 0, sand = 0;
+
+    // 1. Rock / Cliffs (Slope based)
+    // Steep slopes always show rock/cliffs
+    if (slope > 0.6) {
+      rock = blend(slope, 0.6, 0.9);
     }
-    const ambient = 0.5;
-    const amp = 1.0 - ambient;
-    target.set(1 - target.x, 1 - target.y, 1 - target.z).multiplyScalar(amp).addScalar(ambient);
+
+    // 2. Sand (Shoreline)
+    // Centered at 15.0. Fades in/out around that point.
+    if (fy > 11.0 && fy < 17.5) {
+      // Triangle weighting for the beach belt
+      sand = 1.0 - Math.abs(fy - 15.0) / 2.5;
+      sand = Math.max(0, sand);
+    }
+
+    // 3. Grass (The main landmass)
+    if (fy > 16.0) {
+      grass = blend(fy, 16.0, 18.0);
+
+      // Thin the grass out at high altitudes for alpine rock/snow
+      if (fy > 70.0) {
+        grass *= (1.0 - blend(fy, 70.0, 85.0));
+      }
+    }
+
+    // 4. Snow (High caps)
+    if (fy > 70.0) {
+      snow = blend(fy, 70.0, 85.0);
+    }
+
+    // target stores (rock, grass, snow, sand) mapped to (x, y, z, w)
+    target.set(rock, grass, snow, sand);
     return target;
   }
 
@@ -66,11 +111,14 @@ export class Terrain {
     const totalVertices = rowsz * rowsz;
 
     const positions = new Float32Array(totalVertices * 3);
-    const colors = new Float32Array(totalVertices * 3);
+    const colors = new Float32Array(totalVertices * 4);
     const uvs = new Float32Array(totalVertices * 2);
 
     let vIdx = 0;
+    let cIdx = 0;
     let uvIdx = 0;
+
+    const v4 = new THREE.Vector4();
 
     for (let x = ux - 1; x < ux + size + 2; x++) {
       for (let y = uy - 1; y < uy + size + 2; y++) {
@@ -79,15 +127,17 @@ export class Terrain {
         positions[vIdx + 1] = py * this.chunkScale;
         positions[vIdx + 2] = y * this.chunkScale;
 
-        this.getNoiseColor(x, y, this.v0);
-        colors[vIdx] = this.v0.x;
-        colors[vIdx + 1] = this.v0.y;
-        colors[vIdx + 2] = this.v0.z;
+        this.getNoiseColor(x, y, v4);
+        colors[cIdx] = v4.x;
+        colors[cIdx + 1] = v4.y;
+        colors[cIdx + 2] = v4.z;
+        colors[cIdx + 3] = v4.w;
 
         uvs[uvIdx] = x * 0.1;
         uvs[uvIdx + 1] = y * 0.1;
 
         vIdx += 3;
+        cIdx += 4;
         uvIdx += 2;
       }
     }
@@ -125,7 +175,7 @@ export class Terrain {
     const geom = new THREE.BufferGeometry();
 
     geom.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-    geom.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+    geom.setAttribute('splatWeights', new THREE.BufferAttribute(data.colors, 4));
     geom.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2));
 
     // Compute normals using the full set of vertices first

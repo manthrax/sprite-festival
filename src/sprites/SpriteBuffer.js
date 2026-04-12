@@ -40,7 +40,7 @@ export class SpriteBuffer {
           ivm = transpose(ivm);
           mat4 aInstanceMatrix = mat4(ivm[0], ivm[1], ivm[2], vec4(aIPosScale.xyz, 1.0));
           float scale = aIPosScale.w;
-          vec3 transformed = (aInstanceMatrix * vec4(position * scale, 1.0)).xyz;
+          vec3 transformed = (aInstanceMatrix * vec4(position * scale , 1.0)).xyz;
         `
       ).replace(
         '#include <uv_vertex>',
@@ -128,7 +128,7 @@ export class SpriteBuffer {
   allocate(target) {
     const userData = this.spriteMesh.userData;
     if (userData.count >= this.maxSprites) {
-      target.write = () => {};
+      target.write = () => { };
       return;
     }
 
@@ -187,8 +187,8 @@ export class SpriteBuffer {
       const p = this.spriteMesh.geometry.attributes.aIPosScale.array;
       const t = this.spriteMesh.geometry.attributes.aIUV.array;
       const dst = idx * 4, src = lastIdx * 4;
-      p[dst] = p[src]; p[dst+1] = p[src+1]; p[dst+2] = p[src+2]; p[dst+3] = p[src+3];
-      t[dst] = t[src]; t[dst+1] = t[src+1]; t[dst+2] = t[src+2]; t[dst+3] = t[src+3];
+      p[dst] = p[src]; p[dst + 1] = p[src + 1]; p[dst + 2] = p[src + 2]; p[dst + 3] = p[src + 3];
+      t[dst] = t[src]; t[dst + 1] = t[src + 1]; t[dst + 2] = t[src + 2]; t[dst + 3] = t[src + 3];
 
       // Redirect the swapped sprite to its new slot index
       const swapped = this.instances[lastIdx];
@@ -200,7 +200,7 @@ export class SpriteBuffer {
 
     this.instances[lastIdx] = null;
     target.userData.index = -1;
-    target.write = () => {};
+    target.write = () => { };
     this.spriteMesh.userData.uvDirty = true;
   }
 

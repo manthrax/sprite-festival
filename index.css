@@ -44,6 +44,31 @@ p {
   opacity: 0.8;
 }
 
-canvas {
-  display: block;
+#stats {
+  margin-top: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 15px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.stat-label {
+  opacity: 0.6;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.stat-value {
+  color: #87CEEB;
+  font-weight: 700;
 }
