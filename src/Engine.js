@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
  * Core engine class. Handles scene, renderer, camera and main loop.
  */
 class GradientSky {
-  constructor(scene) {
+  constructor() {
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
@@ -19,8 +19,7 @@ class GradientSky {
     grad.addColorStop(1, 'rgba(64,32,0,1)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 64, 64);
-    const texture = new THREE.CanvasTexture(canvas);
-    scene.background = texture;
+    this.texture = new THREE.CanvasTexture(canvas);
   }
 }
 
@@ -31,15 +30,50 @@ export class Engine {
     this.camera = new THREE.PerspectiveCamera(110, window.innerWidth / window.innerHeight, 0.1, 5000);
 
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      logarithmicDepthBuffer: true
+      //antialias: true,
+      logarithmicDepthBuffer: false
     });
-    // this.renderer.setClearColor(0x87CEEB); // Sky blue
-    new GradientSky(this.scene);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.container.appendChild(this.renderer.domElement);
+    this.sky = new GradientSky();
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.autoClear = false;
+
+    // Advanced: G-Buffer for Deferred Rendering
+    // RT0: Material Weights (RGBA)
+    this.gBuffer = new THREE.WebGLRenderTarget(
+      window.innerWidth,
+      window.innerHeight,
+      {
+        count: 2,
+        // 2 targets: [0]=SplatWeights, [1]=Misc
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+        type: THREE.HalfFloatType
+      }
+    );
+    this.gBuffer.depthTexture = new THREE.DepthTexture();
+    this.gBuffer.depthTexture.type = THREE.UnsignedIntType;
+
+    // Scene Color Target for Refraction
+    this.sceneColorTarget = new THREE.RenderTarget(
+      window.innerWidth,
+      window.innerHeight,
+      {
+        count: 1,
+        depth: 1,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        type: THREE.HalfFloatType
+      }
+    );
+    this.sceneColorTarget.depthTexture = new THREE.DepthTexture();
+    this.sceneColorTarget.depthTexture.type = THREE.UnsignedIntType;
+
+    // Fullscreen rendering helpers
+    this.screenCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.screenQuad = new THREE.PlaneGeometry(2, 2);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -61,8 +95,19 @@ export class Engine {
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      this.renderer.setSize(w, h);
+      this.gBuffer.setSize(w, h);
+      this.sceneColorTarget.setSize(w, h);
     });
+
+    window.addEventListener('keydown', (e) => this.emit('keydown', e));
+    window.addEventListener('keyup', (e) => this.emit('keyup', e));
+  }
+
+  setRenderCallback(cb) {
+    this.renderCallback = cb;
   }
 
   on(event, callback) {
@@ -86,6 +131,11 @@ export class Engine {
 
     this.emit('update', delta, time);
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+
+    if (this.renderCallback) {
+      this.renderCallback(delta, time);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 }
